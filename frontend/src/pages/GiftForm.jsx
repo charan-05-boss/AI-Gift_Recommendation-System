@@ -5,7 +5,7 @@ import './GiftForm.css';
 const OCCASIONS = ['Birthday', 'Anniversary', 'Wedding', 'Graduation', 'Baby Shower', 'Christmas', 'Valentine\'s Day', 'Mother\'s Day', 'Father\'s Day', "New Year's", 'Retirement', 'Housewarming', 'Get Well Soon', 'Thank You', 'Other'];
 const RELATIONS = ['Partner/Spouse', 'Parent', 'Sibling', 'Child', 'Friend', 'Colleague', 'Boss', 'Teacher/Mentor', 'Grandparent', 'Cousin', 'Neighbour', 'Other'];
 
-const API_BASE = 'http://localhost:3001';
+const API_BASE = import.meta.env.PROD ? '' : 'http://localhost:3001';
 
 export default function GiftForm({ onSubmit }) {
   const [form, setForm] = useState({

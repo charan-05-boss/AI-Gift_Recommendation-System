@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import './DetailPage.css';
 
-const API_BASE = 'http://localhost:3001';
+const API_BASE = import.meta.env.PROD ? '' : 'http://localhost:3001';
 
 const STATUS_CONFIG = {
   Delivered:  { badge: 'badge-success', icon: <CheckCircle2 size={14} />, color: 'var(--color-success)' },
@@ -154,7 +154,7 @@ export default function DetailPage() {
   const saveNote = async () => {
     setSavingNote(true);
     try {
-      const res = await fetch(`http://localhost:3001/api/orders/${id}/notes`, {
+      const res = await fetch(`${API_BASE}/api/orders/${id}/notes`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ notes: noteText })
@@ -179,7 +179,7 @@ export default function DetailPage() {
   const updateStatus = async (newStatus, reason = null) => {
     setUpdatingStatus(true);
     try {
-      const res = await fetch(`http://localhost:3001/api/orders/${id}/status`, {
+      const res = await fetch(`${API_BASE}/api/orders/${id}/status`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: newStatus, reason })

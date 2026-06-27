@@ -340,6 +340,8 @@ const server = app.listen(port, () => {
   console.log(`   Database: SQLite (WAL mode)\n`);
 });
 
+module.exports = app;
+
 // Graceful shutdown
 process.on('SIGINT', () => {
   console.log('\n🛑 Shutting down gracefully...');

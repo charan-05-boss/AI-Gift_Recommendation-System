@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import './Dashboard.css';
 
-const API_BASE = 'http://localhost:3001';
+const API_BASE = import.meta.env.PROD ? '' : 'http://localhost:3001';
 
 /* ── Mock data for demo when backend is offline ── */
 const MOCK_ORDERS = [
