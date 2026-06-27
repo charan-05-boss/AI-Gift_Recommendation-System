@@ -1,0 +1,19 @@
+/* App-level styles */
+
+.desktop-nav { display: flex; }
+.mobile-nav-controls { display: none; }
+.mobile-menu-btn { display: none; }
+.mobile-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 0 8px;
+  border-top: 1px solid var(--color-border);
+  margin-top: 4px;
+}
+
+@media (max-width: 640px) {
+  .desktop-nav { display: none; }
+  .mobile-nav-controls { display: flex; }
+  .mobile-menu-btn { display: inline-flex; }
+}

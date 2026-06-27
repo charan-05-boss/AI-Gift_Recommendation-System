@@ -1,0 +1,181 @@
+/* GiftForm page styles */
+
+.gf-page {
+  padding-bottom: var(--space-16);
+}
+
+/* Hero */
+.gf-hero {
+  position: relative;
+  padding: var(--space-16) 0 var(--space-12);
+  overflow: hidden;
+}
+
+/* Hero background — subtle structured dot grid, not random radial blobs */
+.gf-hero-bg {
+  position: absolute;
+  inset: 0;
+  background-color: rgba(139, 92, 246, 0.05);
+  pointer-events: none;
+}
+
+.gf-hero-inner {
+  max-width: 640px;
+}
+
+/* Form card */
+.gf-form-wrapper {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  padding: var(--space-8);
+  margin-bottom: var(--space-12);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+form { display: flex; flex-direction: column; gap: var(--space-6); }
+
+.gf-grid {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.gf-grid-2 { grid-template-columns: 1fr 1fr; }
+
+/* Budget input prefix */
+.gf-input-prefix-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.gf-input-prefix {
+  position: absolute;
+  left: 14px;
+  color: var(--text-secondary);
+  font-weight: 600;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.form-input.gf-input-has-prefix {
+  padding-left: 44px;
+}
+
+/* Budget quick-pick chips */
+.gf-budget-chips {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.gf-chip {
+  padding: 5px 14px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-2);
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--duration) var(--ease);
+}
+
+.gf-chip:hover {
+  border-color: var(--accent-from);
+  color: var(--accent-from);
+}
+
+/* Budget chip active — single solid border + bg tint, no gradient */
+.gf-chip.active {
+  background: rgba(139,92,246,0.08);
+  border-color: var(--accent-from);
+  color: var(--accent-from);
+  font-weight: 600;
+}
+
+/* Submit button */
+.gf-submit-btn {
+  width: 100%;
+  margin-top: var(--space-2);
+  position: relative;
+  overflow: hidden;
+}
+
+.gf-submit-btn::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.1);
+  opacity: 0;
+  transition: opacity var(--duration) var(--ease);
+}
+
+.gf-submit-btn:hover::before { opacity: 1; }
+
+/* How it works */
+.gf-steps {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-5);
+}
+
+.gf-step-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  position: relative;
+  overflow: hidden;
+}
+
+.gf-step-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: var(--accent-from);
+  opacity: 0;
+  transition: opacity var(--duration) var(--ease);
+}
+
+.gf-step-card:hover::before { opacity: 1; }
+
+/* Step number — clean circle badge, no emojis */
+.gf-step-num {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-1);
+}
+
+.gf-step-card h3 {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.gf-step-card p {
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .gf-grid-2 { grid-template-columns: 1fr; }
+  .gf-steps { grid-template-columns: 1fr; }
+  .gf-hero { padding: var(--space-10) 0 var(--space-8); }
+  .gf-form-wrapper { padding: var(--space-6); }
+}

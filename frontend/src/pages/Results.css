@@ -1,0 +1,289 @@
+/* Results / Workflow page */
+
+.results-page {
+  padding: var(--space-8) 0 var(--space-16);
+}
+
+.results-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin-bottom: var(--space-8);
+}
+
+.results-meta { display: flex; flex-direction: column; gap: var(--space-2); }
+
+.results-title {
+  font-family: var(--font-display);
+  font-size: clamp(1.5rem, 4vw, 2rem);
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.results-subtitle {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.results-subtitle strong { color: var(--text-primary); }
+
+/* Shortlist bar — refined inline notification strip, not Bootstrap alert */
+.shortlist-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 10px var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-6);
+  box-shadow: var(--shadow-sm);
+}
+
+.shortlist-bar strong { color: var(--text-primary); }
+.shortlist-bar > .btn { margin-left: auto; }
+
+/* Shortlist banner fallback (legacy) */
+.shortlist-banner {
+  margin-bottom: var(--space-6);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* Filters */
+.results-filters {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-8);
+}
+
+/* Rec grid */
+.rec-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: var(--space-5);
+  margin-bottom: var(--space-10);
+}
+
+/* Rec card */
+.rec-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  animation: fadeIn 0.4s var(--ease) both;
+  position: relative;
+  overflow: hidden;
+}
+
+.rec-card--shortlisted {
+  border-color: rgba(139,92,246,0.4);
+  box-shadow: 0 0 20px rgba(139,92,246,0.15);
+}
+
+.rec-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: rgba(139, 92, 246, 0.04);
+  opacity: 0;
+  transition: opacity var(--duration) var(--ease);
+  pointer-events: none;
+}
+
+.rec-card:hover::after { opacity: 1; }
+
+/* Image placeholder — structured gradient shape instead of giant emoji */
+.rec-image-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 140px;
+  background: var(--color-surface-2);
+  border-radius: var(--radius-lg);
+  margin-bottom: var(--space-3);
+  position: relative;
+  border: 1px solid var(--color-border);
+  overflow: hidden;
+}
+
+/* Subtle pattern overlay inside the placeholder */
+.rec-image-placeholder::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-color: transparent;
+  opacity: 0.5;
+}
+
+.rec-emoji {
+  font-size: 2.25rem;
+  line-height: 1;
+  position: relative;
+  z-index: 1;
+  filter: drop-shadow(0 2px 6px rgba(0,0,0,0.08));
+}
+
+/* Category badge and bookmark button — floating over the image placeholder */
+.rec-category-badge {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.rec-bookmark-btn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 5px;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  transition: color var(--duration) var(--ease),
+              border-color var(--duration) var(--ease),
+              box-shadow var(--duration) var(--ease);
+  display: flex;
+  align-items: center;
+}
+
+.rec-bookmark-btn:hover { color: var(--text-primary); box-shadow: var(--shadow-md); }
+.rec-bookmark-btn.active { color: var(--accent-from); border-color: rgba(139,92,246,0.25); }
+
+.rec-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  flex: 1;
+}
+
+.rec-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.rec-title {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.3;
+  flex: 1;
+}
+
+.rec-cost {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.rec-match-score {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  color: var(--accent-from);
+  background: rgba(139,92,246,0.08);
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  font-weight: 500;
+  border: 1px solid rgba(139,92,246,0.15);
+  margin-bottom: var(--space-2);
+}
+
+.rec-match-score strong {
+  font-weight: 700;
+}
+
+.rec-details {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  flex: 1;
+}
+
+.rec-detail-group h4 {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin-bottom: 2px;
+  font-weight: 600;
+}
+
+.rec-detail-group p {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+/* Tags */
+.rec-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.rec-tag {
+  padding: 2px 8px;
+  background: var(--color-surface-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.03em;
+}
+
+/* Actions row */
+.rec-actions {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+/* Feedback row */
+.rec-feedback {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+
+.rec-fb-btn {
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  cursor: pointer;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  transition: all var(--duration) var(--ease);
+}
+
+.rec-fb-btn:hover { border-color: var(--color-border-hover); color: var(--text-secondary); }
+.rec-fb-btn.active-up { border-color: var(--color-success); color: var(--color-success); background: rgba(16,185,129,0.1); }
+.rec-fb-btn.active-down { border-color: var(--color-danger); color: var(--color-danger); background: rgba(239,68,68,0.08); }
+
+/* Footer */
+.results-footer {
+  display: flex;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+@media (max-width: 640px) {
+  .rec-grid { grid-template-columns: 1fr; }
+}

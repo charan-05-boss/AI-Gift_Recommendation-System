@@ -1,0 +1,76 @@
+/**
+ * CursorGlow styles
+ *
+ * Key decisions:
+ *  - `will-change: transform` promotes the element to its own GPU compositing layer
+ *  - `pointer-events: none` ensures it never intercepts any interactions
+ *  - `position: fixed` keeps it viewport-relative as the user scrolls
+ *  - `z-index: 0` + page-wrapper at `z-index: 1` ensures glow is always behind content
+ *  - `opacity: 0` default + JS-driven fade-in on first cursor contact
+ *  - Transition only on `opacity`, never on `transform` (rAF handles transform)
+ */
+
+.cursor-glow {
+  /* Positioning — fixed to viewport, never scrolls with content */
+  position: fixed;
+  top: 0;
+  left: 0;
+
+  /* Size — large and diffused */
+  width: 700px;
+  height: 700px;
+  border-radius: 50%;
+
+  /* GPU layer promotion — critical for 60fps with no main-thread work */
+  will-change: transform;
+  transform: translate(-1400px, -1400px); /* Start well off-screen */
+
+  /* Safety net — never intercepts mouse, keyboard, or touch events */
+  pointer-events: none;
+
+  /* Stacking — below all page content but above page-wrapper's (transparent) background */
+  z-index: -1;
+
+  /* The actual glow — solid color to match solid colors rule */
+  background: rgba(139, 92, 246, 0.15);
+
+  /* Reduced gaussian blur to make the core more defined */
+  filter: blur(35px);
+
+  /* Opacity — starts invisible, JS fades in on first cursor contact */
+  opacity: 0;
+  transition: opacity 1.2s cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* Opacity for tablet — overridden via JS custom property */
+  --glow-opacity: 1;
+}
+
+/* Dark mode — slightly higher opacity since dark backgrounds show glow better */
+[data-theme='dark'] .cursor-glow {
+  background: rgba(139, 92, 246, 0.20);
+  filter: blur(40px);
+}
+
+/* Mobile — hidden entirely */
+@media (max-width: 767px) {
+  .cursor-glow {
+    display: none;
+  }
+}
+
+/* Tablet — JS reduces opacity to 0.5, CSS reinforces */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .cursor-glow {
+    width: 500px;
+    height: 500px;
+    filter: blur(30px);
+  }
+}
+
+/* Reduced motion — no movement at all; JS sets a static position */
+@media (prefers-reduced-motion: reduce) {
+  .cursor-glow {
+    /* Kill the rAF-driven animation entirely — static ambient only */
+    transition: none;
+  }
+}
