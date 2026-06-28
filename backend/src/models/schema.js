@@ -248,7 +248,7 @@ function initializeDatabase() {
   console.log('📦 Initializing database...');
   createTables();
   seedProducts();
-  seedDemoOrders();
+  // seedDemoOrders(); // Removed for deployment
   console.log('✅ Database ready.\n');
 }
 

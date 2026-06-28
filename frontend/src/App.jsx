@@ -103,11 +103,13 @@ function Nav() {
 function AppRoutes() {
   const [recommendations, setRecommendations] = useState(null);
   const [formData, setFormData] = useState(null);
+  const [orderId, setOrderId] = useState(null);
   const navigate = useNavigate();
 
-  const handleFormSubmit = (data, recs) => {
+  const handleFormSubmit = (data, recs, id) => {
     setFormData(data);
     setRecommendations(recs);
+    setOrderId(id);
     navigate('/results');
   };
 
@@ -118,7 +120,7 @@ function AppRoutes() {
       <main style={{ flex: 1 }}>
         <Routes>
           <Route path="/" element={<GiftForm onSubmit={handleFormSubmit} />} />
-          <Route path="/results" element={<Results recommendations={recommendations} formData={formData} />} />
+          <Route path="/results" element={<Results recommendations={recommendations} formData={formData} orderId={orderId} />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/dashboard/:id" element={<DetailPage />} />
         </Routes>

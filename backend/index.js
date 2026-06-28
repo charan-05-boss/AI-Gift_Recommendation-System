@@ -152,7 +152,20 @@ app.post('/api/recommendations', asyncHandler(async (req, res) => {
 // Creates a quick order from a selected recommendation card.
 app.post('/api/orders', asyncHandler(async (req, res) => {
   const db = getDb();
-  const { recommendation, customer } = req.body;
+  const { recommendation, customer, orderId } = req.body;
+
+  if (orderId) {
+    const recRecord = db.prepare('SELECT id FROM recommendations WHERE order_id = ?').get(orderId);
+    if (recRecord) {
+      db.prepare("UPDATE recommendations SET max_budget = ?, updated_at = datetime('now') WHERE id = ?")
+        .run(recommendation?.estimatedCost || 50, recRecord.id);
+        
+      db.prepare(`INSERT INTO recommendation_history (recommendation_id, action, actor) VALUES (?, ?, ?)`).run(
+        recRecord.id, `Customer ordered: "${recommendation?.title || 'Gift'}".`, 'System'
+      );
+      return res.status(200).json({ success: true, message: `Order ${orderId} updated.`, order_id: orderId });
+    }
+  }
 
   // Generate next order_id
   const lastOrder = db.prepare(`SELECT order_id FROM recommendations ORDER BY id DESC LIMIT 1`).get();
@@ -161,7 +174,7 @@ app.post('/api/orders', asyncHandler(async (req, res) => {
     const match = lastOrder.order_id.match(/ORD-(\d+)/);
     if (match) nextNum = parseInt(match[1]) + 1;
   }
-  const orderId = `ORD-${String(nextNum).padStart(3, '0')}`;
+  const newOrderId = `ORD-${String(nextNum).padStart(3, '0')}`;
 
   db.transaction(() => {
     const cust = db.prepare(`INSERT INTO customers (name) VALUES (?)`).run('Guest');
@@ -169,14 +182,14 @@ app.post('/api/orders', asyncHandler(async (req, res) => {
       cust.lastInsertRowid, 'Recipient', customer?.relation || 'Friend', parseInt(customer?.age) || 25, customer?.preferences || null
     );
     const rec = db.prepare(`INSERT INTO recommendations (order_id, customer_id, recipient_id, occasion, min_budget, max_budget, status, owner) VALUES (?, ?, ?, ?, ?, ?, 'Processing', 'Unassigned')`).run(
-      orderId, cust.lastInsertRowid, recip.lastInsertRowid, customer?.occasion || 'Other', recommendation?.estimatedCost || 50, recommendation?.estimatedCost || 50
+      newOrderId, cust.lastInsertRowid, recip.lastInsertRowid, customer?.occasion || 'Other', recommendation?.estimatedCost || 50, recommendation?.estimatedCost || 50
     );
     db.prepare(`INSERT INTO recommendation_history (recommendation_id, action, actor) VALUES (?, ?, ?)`).run(
       rec.lastInsertRowid, `Order placed for "${recommendation?.title || 'Gift'}".`, 'System'
     );
   })();
 
-  res.status(201).json({ success: true, message: `Order ${orderId} created.`, order_id: orderId });
+  res.status(201).json({ success: true, message: `Order ${newOrderId} created.`, order_id: newOrderId });
 }));
 
 // ── Legacy endpoint: GET /api/orders + GET /api/orders/:id ──
@@ -318,6 +331,21 @@ app.put('/api/orders/:id/notes', asyncHandler(async (req, res) => {
   );
 
   res.json({ success: true, message: 'Notes updated successfully.' });
+}));
+
+// ── DELETE /api/orders/:id ──
+app.delete('/api/orders/:id', asyncHandler(async (req, res) => {
+  const db = getDb();
+  const { id } = req.params;
+
+  const rec = db.prepare('SELECT id FROM recommendations WHERE order_id = ?').get(id);
+  if (!rec) {
+    throw new AppError(`Order '${id}' not found.`, 404);
+  }
+
+  db.prepare('DELETE FROM recommendations WHERE id = ?').run(rec.id);
+
+  res.json({ success: true, message: 'Order deleted successfully.' });
 }));
 
 // ── 404 handler ──

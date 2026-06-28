@@ -126,6 +126,7 @@ export default function DetailPage() {
   const [savingNote, setSavingNote] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
+  const [showDeliveredModal, setShowDeliveredModal] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
 
   useEffect(() => {
@@ -209,10 +210,29 @@ export default function DetailPage() {
     setShowCancelModal(true);
   };
 
-  const confirmCancel = () => {
-    updateStatus('Cancelled', cancelReason || 'No reason provided');
+  const confirmCancel = async () => {
+    setUpdatingStatus(true);
+    try {
+      await fetch(`${API_BASE}/api/orders/${id}`, { method: 'DELETE' });
+      navigate('/dashboard');
+    } catch (err) {
+      console.error(err);
+      setUpdatingStatus(false);
+    }
     setShowCancelModal(false);
     setCancelReason('');
+  };
+
+  const confirmDelivered = async () => {
+    setUpdatingStatus(true);
+    try {
+      await fetch(`${API_BASE}/api/orders/${id}`, { method: 'DELETE' });
+      navigate('/dashboard');
+    } catch (err) {
+      console.error(err);
+      setUpdatingStatus(false);
+    }
+    setShowDeliveredModal(false);
   };
 
   if (loading) {
@@ -267,7 +287,7 @@ export default function DetailPage() {
                 <button
                   key={s}
                   className={`btn btn-sm ${order.status === s ? 'btn-primary' : 'btn-secondary'}`}
-                  onClick={() => updateStatus(s)}
+                  onClick={() => s === 'Delivered' ? setShowDeliveredModal(true) : updateStatus(s)}
                   disabled={updatingStatus || order.status === s}
                 >
                   {updatingStatus && order.status !== s
@@ -417,12 +437,12 @@ export default function DetailPage() {
           <div className="card" style={{ width: '90%', maxWidth: 400, padding: 'var(--space-6)', animation: 'slideUp var(--duration) var(--ease)' }}>
             <h2 style={{ fontSize: '1.25rem', marginBottom: 'var(--space-2)' }}>Cancel Order</h2>
             <p style={{ color: 'var(--text-secondary)', marginBottom: 'var(--space-4)', fontSize: '0.875rem' }}>
-              Please provide a reason for cancelling this order.
+              Are you sure you want to cancel this order? It will be deleted from the dashboard.
             </p>
             <input
               type="text"
               className="form-input"
-              placeholder="e.g., Customer requested change"
+              placeholder="Reason (e.g., Customer requested change)"
               value={cancelReason}
               onChange={e => setCancelReason(e.target.value)}
               style={{ marginBottom: 'var(--space-5)' }}
@@ -441,6 +461,37 @@ export default function DetailPage() {
                 onClick={confirmCancel}
               >
                 Confirm Cancellation
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delivered Modal */}
+      {showDeliveredModal && (
+        <div style={{
+          position: 'fixed', inset: 0, backgroundColor: 'rgba(0, 0, 0, 0.5)', 
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100,
+          backdropFilter: 'blur(2px)'
+        }}>
+          <div className="card" style={{ width: '90%', maxWidth: 400, padding: 'var(--space-6)', animation: 'slideUp var(--duration) var(--ease)' }}>
+            <h2 style={{ fontSize: '1.25rem', marginBottom: 'var(--space-2)' }}>Mark as Delivered</h2>
+            <p style={{ color: 'var(--text-secondary)', marginBottom: 'var(--space-5)', fontSize: '0.875rem', lineHeight: 1.5 }}>
+              Are you sure you want to mark this order as Delivered? This will complete the order and remove it from the dashboard.
+            </p>
+            <div style={{ display: 'flex', gap: 'var(--space-3)', justifyContent: 'flex-end' }}>
+              <button 
+                className="btn btn-ghost" 
+                onClick={() => setShowDeliveredModal(false)}
+              >
+                Back
+              </button>
+              <button 
+                className="btn btn-primary" 
+                style={{ backgroundColor: 'var(--color-success)', borderColor: 'var(--color-success)' }}
+                onClick={confirmDelivered}
+              >
+                Confirm Delivery
               </button>
             </div>
           </div>

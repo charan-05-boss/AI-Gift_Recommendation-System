@@ -63,11 +63,11 @@ export default function GiftForm({ onSubmit }) {
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || 'Unexpected error from server.');
-      onSubmit(payload, data.recommendations);
+      onSubmit(payload, data.recommendations, data.order_id);
     } catch (err) {
       // Graceful degradation: show mock results if backend is unavailable
       const mockRecs = generateMockRecommendations(form);
-      onSubmit({ ...form, age: parseInt(form.age), budget: parseFloat(form.budget) }, mockRecs);
+      onSubmit({ ...form, age: parseInt(form.age), budget: parseFloat(form.budget) }, mockRecs, 'ORD-MOCK');
     } finally {
       setLoading(false);
     }

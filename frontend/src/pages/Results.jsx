@@ -4,13 +4,13 @@ import {
   Gift, Bookmark, BookmarkCheck,
   ThumbsUp, ThumbsDown, ArrowLeft, Sparkles,
   Filter, Tag, ChevronRight, Send, RotateCcw,
-  LayoutDashboard
+  LayoutDashboard, ExternalLink
 } from 'lucide-react';
 import './Results.css';
 
 const API_BASE = import.meta.env.PROD ? '' : 'http://localhost:3001';
 
-export default function Results({ recommendations, formData }) {
+export default function Results({ recommendations, formData, orderId }) {
   const navigate = useNavigate();
   const [shortlist, setShortlist] = useState([]);
   const [feedback, setFeedback] = useState({}); // { [id]: 'up'|'down' }
@@ -55,7 +55,7 @@ export default function Results({ recommendations, formData }) {
       await fetch(`${API_BASE}/api/orders`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ recommendation: rec, customer: formData }),
+        body: JSON.stringify({ recommendation: rec, customer: formData, orderId }),
       });
     } catch (_) { /* graceful ignore if backend down */ }
     await new Promise(r => setTimeout(r, 1200));
