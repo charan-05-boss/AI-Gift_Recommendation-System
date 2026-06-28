@@ -13,6 +13,9 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const helmet = require('helmet');
+const compression = require('compression');
+const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
 const { initializeDatabase } = require('./src/models/schema');
@@ -32,8 +35,22 @@ const app = express();
 const port = process.env.PORT || 3001;
 
 // ── Middleware ──
+app.use(helmet({
+  contentSecurityPolicy: false, // Disabled for local dev/Vite compat depending on setup. You can fine tune this later.
+}));
+app.use(compression());
 app.use(cors());
 app.use(express.json({ limit: '1mb' }));
+
+// Rate limiting
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // Limit each IP to 100 requests per windowMs
+  message: 'Too many requests from this IP, please try again later.',
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use('/api/', apiLimiter);
 
 // Request logging (development)
 app.use((req, res, next) => {
