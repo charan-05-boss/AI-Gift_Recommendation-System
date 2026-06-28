@@ -33,7 +33,7 @@ async function recommend(input, maxResults = 4) {
 
   // Default: rule-based engine (always available)
   console.log('  🧠 Using rule-based scoring engine...');
-  const recommendations = ruleBasedGenerate(input, maxResults);
+  const recommendations = await ruleBasedGenerate(input, maxResults);
   return { engine: 'rule-based', recommendations };
 }
 

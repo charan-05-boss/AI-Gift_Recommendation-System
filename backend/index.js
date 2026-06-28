@@ -4,7 +4,7 @@
  * Backend Entry Point
  *
  * Express server with:
- *   - Database initialization (SQLite)
+ *   - Database initialization (PostgreSQL)
  *   - REST API routing
  *   - Global error handling
  *   - CORS for frontend integration
@@ -12,12 +12,12 @@
 
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 require('dotenv').config();
 
 const { initializeDatabase } = require('./src/models/schema');
 const { errorHandler, asyncHandler, AppError } = require('./src/middleware/errorHandler');
-const { getDb } = require('./src/config/database');
-const { closeDb } = require('./src/config/database');
+const { getDb, closeDb } = require('./src/config/database');
 const { recommend } = require('./src/services/aiEngine');
 const { validateCreateInput } = require('./src/services/validation');
 
@@ -51,7 +51,7 @@ app.get('/api/health', (req, res) => {
   res.json({
     success: true,
     status: 'Backend is running correctly.',
-    database: 'SQLite (WAL mode)',
+    database: 'PostgreSQL',
     engine: process.env.GEMINI_API_KEY ? 'Gemini API' : 'Rule-Based Scoring',
     timestamp: new Date().toISOString(),
   });
@@ -78,7 +78,8 @@ app.post('/api/recommendations', asyncHandler(async (req, res) => {
   const db = getDb();
 
   // Generate next order_id
-  const lastOrder = db.prepare(`SELECT order_id FROM recommendations ORDER BY id DESC LIMIT 1`).get();
+  const lastOrderRes = await db.query(`SELECT order_id FROM recommendations ORDER BY id DESC LIMIT 1`);
+  const lastOrder = lastOrderRes.rows[0];
   let nextNum = 1;
   if (lastOrder && lastOrder.order_id) {
     const match = lastOrder.order_id.match(/ORD-(\d+)/);
@@ -86,20 +87,34 @@ app.post('/api/recommendations', asyncHandler(async (req, res) => {
   }
   const orderId = `ORD-${String(nextNum).padStart(3, '0')}`;
 
-  // Create records
-  const result = db.transaction(() => {
-    const cust = db.prepare(`INSERT INTO customers (name) VALUES (?)`).run(body.customerName || 'Guest');
-    const recip = db.prepare(`INSERT INTO recipients (customer_id, name, relation, age, preferences) VALUES (?, ?, ?, ?, ?)`).run(
-      cust.lastInsertRowid, body.recipientName || 'Recipient', body.relation, parseInt(body.age), body.preferences || null
+  const client = await db.connect();
+  let recId;
+  try {
+    await client.query('BEGIN');
+    const custRes = await client.query(`INSERT INTO customers (name) VALUES ($1) RETURNING id`, [body.customerName || 'Guest']);
+    const custId = custRes.rows[0].id;
+    
+    const recipRes = await client.query(
+      `INSERT INTO recipients (customer_id, name, relation, age, preferences) VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+      [custId, body.recipientName || 'Recipient', body.relation, parseInt(body.age), body.preferences || null]
     );
-    const rec = db.prepare(`INSERT INTO recommendations (order_id, customer_id, recipient_id, occasion, min_budget, max_budget) VALUES (?, ?, ?, ?, ?, ?)`).run(
-      orderId, cust.lastInsertRowid, recip.lastInsertRowid, body.occasion, parseFloat(body.minBudget), parseFloat(body.maxBudget)
+    const recipId = recipRes.rows[0].id;
+
+    const recRes = await client.query(
+      `INSERT INTO recommendations (order_id, customer_id, recipient_id, occasion, min_budget, max_budget) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+      [orderId, custId, recipId, body.occasion, parseFloat(body.minBudget), parseFloat(body.maxBudget)]
     );
-    db.prepare(`INSERT INTO recommendation_history (recommendation_id, action, actor) VALUES (?, ?, ?)`).run(
-      rec.lastInsertRowid, 'Order created via quick recommendation form.', 'System'
-    );
-    return { recId: rec.lastInsertRowid, orderId };
-  })();
+    recId = recRes.rows[0].id;
+
+    await client.query(`INSERT INTO recommendation_history (recommendation_id, action, actor) VALUES ($1, $2, $3)`, [recId, 'Order created via quick recommendation form.', 'System']);
+    
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 
   // Run AI engine
   const input = {
@@ -114,23 +129,29 @@ app.post('/api/recommendations', asyncHandler(async (req, res) => {
   const { engine, recommendations } = await recommend(input);
 
   // Save items
-  db.transaction(() => {
-    const insertItem = db.prepare(`
+  const client2 = await db.connect();
+  try {
+    await client2.query('BEGIN');
+    const insertItem = `
       INSERT INTO recommendation_items (recommendation_id, gift_product_id, title, description, estimated_cost, emotional_fit, next_steps, rank)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `);
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    `;
     for (const item of recommendations) {
-      insertItem.run(result.recId, item.gift_product_id || null, item.title, item.description, item.estimated_cost, item.emotional_fit || null, item.next_steps || null, item.rank);
+      await client2.query(insertItem, [recId, item.gift_product_id || null, item.title, item.description, item.estimated_cost, item.emotional_fit || null, item.next_steps || null, item.rank]);
     }
-    db.prepare(`UPDATE recommendations SET status = 'Processing', updated_at = datetime('now') WHERE id = ?`).run(result.recId);
-    db.prepare(`INSERT INTO recommendation_history (recommendation_id, action, actor) VALUES (?, ?, ?)`).run(
-      result.recId, `AI engine (${engine}) generated ${recommendations.length} recommendations.`, 'System'
-    );
-  })();
+    await client2.query(`UPDATE recommendations SET status = 'Processing', updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [recId]);
+    await client2.query(`INSERT INTO recommendation_history (recommendation_id, action, actor) VALUES ($1, $2, $3)`, [recId, `AI engine (${engine}) generated ${recommendations.length} recommendations.`, 'System']);
+    await client2.query('COMMIT');
+  } catch (err) {
+    await client2.query('ROLLBACK');
+    throw err;
+  } finally {
+    client2.release();
+  }
 
   res.json({
     success: true,
-    order_id: result.orderId,
+    order_id: orderId,
     engine,
     recommendations: recommendations.map(r => ({
       id: r.rank,
@@ -149,26 +170,23 @@ app.post('/api/recommendations', asyncHandler(async (req, res) => {
 }));
 
 // ── POST /api/orders – "Order This" from the Results page ──
-// Creates a quick order from a selected recommendation card.
 app.post('/api/orders', asyncHandler(async (req, res) => {
   const db = getDb();
   const { recommendation, customer, orderId } = req.body;
 
   if (orderId) {
-    const recRecord = db.prepare('SELECT id FROM recommendations WHERE order_id = ?').get(orderId);
+    const recRecordRes = await db.query('SELECT id FROM recommendations WHERE order_id = $1', [orderId]);
+    const recRecord = recRecordRes.rows[0];
     if (recRecord) {
-      db.prepare("UPDATE recommendations SET max_budget = ?, updated_at = datetime('now') WHERE id = ?")
-        .run(recommendation?.estimatedCost || 50, recRecord.id);
-        
-      db.prepare(`INSERT INTO recommendation_history (recommendation_id, action, actor) VALUES (?, ?, ?)`).run(
-        recRecord.id, `Customer ordered: "${recommendation?.title || 'Gift'}".`, 'System'
-      );
+      await db.query("UPDATE recommendations SET max_budget = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2", [recommendation?.estimatedCost || 50, recRecord.id]);
+      await db.query(`INSERT INTO recommendation_history (recommendation_id, action, actor) VALUES ($1, $2, $3)`, [recRecord.id, `Customer ordered: "${recommendation?.title || 'Gift'}".`, 'System']);
       return res.status(200).json({ success: true, message: `Order ${orderId} updated.`, order_id: orderId });
     }
   }
 
   // Generate next order_id
-  const lastOrder = db.prepare(`SELECT order_id FROM recommendations ORDER BY id DESC LIMIT 1`).get();
+  const lastOrderRes = await db.query(`SELECT order_id FROM recommendations ORDER BY id DESC LIMIT 1`);
+  const lastOrder = lastOrderRes.rows[0];
   let nextNum = 1;
   if (lastOrder && lastOrder.order_id) {
     const match = lastOrder.order_id.match(/ORD-(\d+)/);
@@ -176,18 +194,32 @@ app.post('/api/orders', asyncHandler(async (req, res) => {
   }
   const newOrderId = `ORD-${String(nextNum).padStart(3, '0')}`;
 
-  db.transaction(() => {
-    const cust = db.prepare(`INSERT INTO customers (name) VALUES (?)`).run('Guest');
-    const recip = db.prepare(`INSERT INTO recipients (customer_id, name, relation, age, preferences) VALUES (?, ?, ?, ?, ?)`).run(
-      cust.lastInsertRowid, 'Recipient', customer?.relation || 'Friend', parseInt(customer?.age) || 25, customer?.preferences || null
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    const custRes = await client.query(`INSERT INTO customers (name) VALUES ($1) RETURNING id`, ['Guest']);
+    const custId = custRes.rows[0].id;
+
+    const recipRes = await client.query(
+      `INSERT INTO recipients (customer_id, name, relation, age, preferences) VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+      [custId, 'Recipient', customer?.relation || 'Friend', parseInt(customer?.age) || 25, customer?.preferences || null]
     );
-    const rec = db.prepare(`INSERT INTO recommendations (order_id, customer_id, recipient_id, occasion, min_budget, max_budget, status, owner) VALUES (?, ?, ?, ?, ?, ?, 'Processing', 'Unassigned')`).run(
-      newOrderId, cust.lastInsertRowid, recip.lastInsertRowid, customer?.occasion || 'Other', recommendation?.estimatedCost || 50, recommendation?.estimatedCost || 50
+    const recipId = recipRes.rows[0].id;
+
+    const recRes = await client.query(
+      `INSERT INTO recommendations (order_id, customer_id, recipient_id, occasion, min_budget, max_budget, status, owner) VALUES ($1, $2, $3, $4, $5, $6, 'Processing', 'Unassigned') RETURNING id`,
+      [newOrderId, custId, recipId, customer?.occasion || 'Other', recommendation?.estimatedCost || 50, recommendation?.estimatedCost || 50]
     );
-    db.prepare(`INSERT INTO recommendation_history (recommendation_id, action, actor) VALUES (?, ?, ?)`).run(
-      rec.lastInsertRowid, `Order placed for "${recommendation?.title || 'Gift'}".`, 'System'
-    );
-  })();
+    const recId = recRes.rows[0].id;
+
+    await client.query(`INSERT INTO recommendation_history (recommendation_id, action, actor) VALUES ($1, $2, $3)`, [recId, `Order placed for "${recommendation?.title || 'Gift'}".`, 'System']);
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 
   res.status(201).json({ success: true, message: `Order ${newOrderId} created.`, order_id: newOrderId });
 }));
@@ -196,12 +228,13 @@ app.post('/api/orders', asyncHandler(async (req, res) => {
 // For backward-compatibility with the frontend dashboard.
 app.get('/api/orders', asyncHandler(async (req, res) => {
   const db = getDb();
-  const orders = db.prepare(`
+  const ordersRes = await db.query(`
     SELECT r.*, rec.name AS recipient, rec.relation
     FROM recommendations r
     JOIN recipients rec ON rec.id = r.recipient_id
     ORDER BY r.created_at DESC
-  `).all();
+  `);
+  const orders = ordersRes.rows;
 
   res.json({
     success: true,
@@ -212,9 +245,9 @@ app.get('/api/orders', asyncHandler(async (req, res) => {
       relation: o.relation,
       occasion: o.occasion,
       status: o.status,
-      date: o.created_at ? o.created_at.split('T')[0].split(' ')[0] : null,
+      date: o.created_at ? new Date(o.created_at).toISOString().split('T')[0] : null,
       owner: o.owner,
-      amount: Math.round(o.max_budget),
+      amount: Math.round(parseFloat(o.max_budget)),
       priority: !!o.priority,
     })),
   });
@@ -224,30 +257,33 @@ app.get('/api/orders/:id', asyncHandler(async (req, res) => {
   const db = getDb();
   const { id } = req.params;
 
-  const rec = db.prepare(`
+  const recRes = await db.query(`
     SELECT r.*, rec.name AS recipient_name, rec.relation, rec.age, rec.preferences
     FROM recommendations r
     JOIN recipients rec ON rec.id = r.recipient_id
-    WHERE r.order_id = ?
-  `).get(id);
+    WHERE r.order_id = $1
+  `, [id]);
+  const rec = recRes.rows[0];
 
   if (!rec) {
     throw new AppError(`Order '${id}' not found.`, 404);
   }
 
-  const items = db.prepare(`
+  const itemsRes = await db.query(`
     SELECT ri.*, gp.product_url, gp.image_emoji, gp.rating, gp.tags, gp.category
     FROM recommendation_items ri
     LEFT JOIN gift_products gp ON gp.id = ri.gift_product_id
-    WHERE ri.recommendation_id = ?
+    WHERE ri.recommendation_id = $1
     ORDER BY ri.rank ASC
-  `).all(rec.id);
+  `, [rec.id]);
+  const items = itemsRes.rows;
 
-  const history = db.prepare(`
-    SELECT * FROM recommendation_history WHERE recommendation_id = ? ORDER BY timestamp DESC
-  `).all(rec.id);
+  const historyRes = await db.query(`
+    SELECT * FROM recommendation_history WHERE recommendation_id = $1 ORDER BY timestamp DESC
+  `, [rec.id]);
+  const history = historyRes.rows;
 
-  const topItem = items.find(i => i.rank === 1);
+  const topItem = items.find(i => parseInt(i.rank) === 1);
 
   res.json({
     success: true,
@@ -258,18 +294,18 @@ app.get('/api/orders/:id', asyncHandler(async (req, res) => {
       relation: rec.relation,
       age: rec.age,
       occasion: rec.occasion,
-      minBudget: rec.min_budget,
-      maxBudget: rec.max_budget,
+      minBudget: parseFloat(rec.min_budget),
+      maxBudget: parseFloat(rec.max_budget),
       status: rec.status,
       priority: !!rec.priority,
       owner: rec.owner,
       notes: rec.notes,
-      date: rec.created_at ? rec.created_at.split('T')[0].split(' ')[0] : null,
-      amount: topItem ? Math.round(topItem.estimated_cost) : Math.round(rec.max_budget),
+      date: rec.created_at ? new Date(rec.created_at).toISOString().split('T')[0] : null,
+      amount: topItem ? Math.round(parseFloat(topItem.estimated_cost)) : Math.round(parseFloat(rec.max_budget)),
       aiOutput: items.map(i => ({
         title: i.title,
         desc: i.description,
-        cost: i.estimated_cost,
+        cost: parseFloat(i.estimated_cost),
         emotional_fit: i.emotional_fit,
         next_steps: i.next_steps,
       })),
@@ -292,23 +328,22 @@ app.put('/api/orders/:id/status', asyncHandler(async (req, res) => {
     throw new AppError('Status is required.', 400);
   }
 
-  const rec = db.prepare('SELECT id, status FROM recommendations WHERE order_id = ?').get(id);
+  const recRes = await db.query('SELECT id, status FROM recommendations WHERE order_id = $1', [id]);
+  const rec = recRes.rows[0];
   if (!rec) {
     throw new AppError(`Order '${id}' not found.`, 404);
   }
 
   const oldStatus = rec.status;
   
-  db.prepare(`UPDATE recommendations SET status = ?, updated_at = datetime('now') WHERE id = ?`).run(status, rec.id);
+  await db.query(`UPDATE recommendations SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [status, rec.id]);
 
   let actionText = `Status updated: ${oldStatus} to ${status}.`;
   if (status === 'Cancelled' && reason) {
     actionText += ` Reason: ${reason}`;
   }
 
-  db.prepare(`INSERT INTO recommendation_history (recommendation_id, action, actor) VALUES (?, ?, ?)`).run(
-    rec.id, actionText, 'User'
-  );
+  await db.query(`INSERT INTO recommendation_history (recommendation_id, action, actor) VALUES ($1, $2, $3)`, [rec.id, actionText, 'User']);
 
   res.json({ success: true, status, message: 'Status updated successfully.' });
 }));
@@ -319,16 +354,14 @@ app.put('/api/orders/:id/notes', asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { notes } = req.body;
 
-  const rec = db.prepare('SELECT id FROM recommendations WHERE order_id = ?').get(id);
+  const recRes = await db.query('SELECT id FROM recommendations WHERE order_id = $1', [id]);
+  const rec = recRes.rows[0];
   if (!rec) {
     throw new AppError(`Order '${id}' not found.`, 404);
   }
 
-  db.prepare(`UPDATE recommendations SET notes = ?, updated_at = datetime('now') WHERE id = ?`).run(notes || '', rec.id);
-
-  db.prepare(`INSERT INTO recommendation_history (recommendation_id, action, actor) VALUES (?, ?, ?)`).run(
-    rec.id, 'Notes updated.', 'User'
-  );
+  await db.query(`UPDATE recommendations SET notes = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [notes || '', rec.id]);
+  await db.query(`INSERT INTO recommendation_history (recommendation_id, action, actor) VALUES ($1, $2, $3)`, [rec.id, 'Notes updated.', 'User']);
 
   res.json({ success: true, message: 'Notes updated successfully.' });
 }));
@@ -338,46 +371,67 @@ app.delete('/api/orders/:id', asyncHandler(async (req, res) => {
   const db = getDb();
   const { id } = req.params;
 
-  const rec = db.prepare('SELECT id FROM recommendations WHERE order_id = ?').get(id);
+  const recRes = await db.query('SELECT id FROM recommendations WHERE order_id = $1', [id]);
+  const rec = recRes.rows[0];
   if (!rec) {
     throw new AppError(`Order '${id}' not found.`, 404);
   }
 
-  db.prepare('DELETE FROM recommendations WHERE id = ?').run(rec.id);
+  await db.query('DELETE FROM recommendations WHERE id = $1', [rec.id]);
 
   res.json({ success: true, message: 'Order deleted successfully.' });
 }));
 
-// ── 404 handler ──
-app.use((req, res) => {
+// ── Static Files (Frontend) ──
+app.use(express.static(path.join(__dirname, '../frontend/dist')));
+
+// ── 404 handler for API routes ──
+app.use('/api', (req, res) => {
   res.status(404).json({
     success: false,
     error: `Route ${req.method} ${req.originalUrl} not found.`,
   });
 });
 
+// ── SPA Fallback (React Router) ──
+app.use((req, res, next) => {
+  if (req.method === 'GET' && !req.originalUrl.startsWith('/api')) {
+    res.sendFile(path.join(__dirname, '../frontend/dist/index.html'));
+  } else {
+    next();
+  }
+});
+
 // ── Global error handler (must be last) ──
 app.use(errorHandler);
 
 // ── Start Server ──
-initializeDatabase();
-
-const server = app.listen(port, () => {
-  console.log(`\n✈️  Paper Plane backend listening at http://localhost:${port}`);
-  console.log(`   Engine: ${process.env.GEMINI_API_KEY ? 'Gemini API' : 'Rule-Based Scoring'}`);
-  console.log(`   Database: SQLite (WAL mode)\n`);
-});
+let server;
+(async () => {
+  try {
+    await initializeDatabase();
+    server = app.listen(port, () => {
+      console.log(`\n✈️  Paper Plane backend listening at http://localhost:${port}`);
+      console.log(`   Engine: ${process.env.GEMINI_API_KEY ? 'Gemini API' : 'Rule-Based Scoring'}`);
+      console.log(`   Database: PostgreSQL\n`);
+    });
+  } catch (err) {
+    console.error('Failed to initialize database:', err);
+  }
+})();
 
 module.exports = app;
 
 // Graceful shutdown
-process.on('SIGINT', () => {
+process.on('SIGINT', async () => {
   console.log('\n🛑 Shutting down gracefully...');
-  closeDb();
-  server.close(() => process.exit(0));
+  await closeDb();
+  if (server) server.close(() => process.exit(0));
+  else process.exit(0);
 });
 
-process.on('SIGTERM', () => {
-  closeDb();
-  server.close(() => process.exit(0));
+process.on('SIGTERM', async () => {
+  await closeDb();
+  if (server) server.close(() => process.exit(0));
+  else process.exit(0);
 });

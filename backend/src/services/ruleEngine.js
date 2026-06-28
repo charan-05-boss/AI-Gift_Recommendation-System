@@ -104,17 +104,18 @@ const NEXT_STEPS_TEMPLATES = [
  * @param {number} [maxResults=4]
  * @returns {Array<Object>} Ranked recommendations with descriptions and emotional fit.
  */
-function generateRecommendations(input, maxResults = 4) {
+async function generateRecommendations(input, maxResults = 4) {
   const { occasion, relation, age, minBudget, maxBudget, preferences } = input;
   const db = getDb();
 
   // 1. Fetch all active products within budget
-  const products = db.prepare(`
+  const productsRes = await db.query(`
     SELECT * FROM gift_products
-    WHERE is_active = 1
-      AND price <= ?
+    WHERE is_active = true
+      AND price <= $1
     ORDER BY rating DESC
-  `).all(maxBudget * 1.1); // Allow 10% over-budget for flexibility
+  `, [maxBudget * 1.1]); // Allow 10% over-budget for flexibility
+  const products = productsRes.rows;
 
   if (products.length === 0) {
     return [{

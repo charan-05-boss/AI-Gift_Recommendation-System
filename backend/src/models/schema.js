@@ -10,102 +10,102 @@ const { getDb } = require('../config/database');
 /**
  * Create all tables if they don't already exist.
  */
-function createTables() {
+async function createTables() {
   const db = getDb();
 
-  db.exec(`
+  await db.query(`
     CREATE TABLE IF NOT EXISTS customers (
-      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      id            SERIAL PRIMARY KEY,
       name          TEXT    NOT NULL DEFAULT 'Guest',
       email         TEXT,
       phone         TEXT,
-      created_at    DATETIME DEFAULT (datetime('now'))
+      created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS recipients (
-      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      id            SERIAL PRIMARY KEY,
       customer_id   INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
       name          TEXT    DEFAULT 'Unnamed Recipient',
       relation      TEXT    NOT NULL,
       age           INTEGER NOT NULL CHECK (age >= 1 AND age <= 120),
       preferences   TEXT,
-      created_at    DATETIME DEFAULT (datetime('now'))
+      created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS gift_products (
-      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      id            SERIAL PRIMARY KEY,
       title         TEXT    NOT NULL,
       description   TEXT,
       category      TEXT,
-      price         REAL    NOT NULL CHECK (price > 0),
+      price         NUMERIC NOT NULL CHECK (price > 0),
       min_age       INTEGER DEFAULT 1,
       max_age       INTEGER DEFAULT 120,
       tags          TEXT,
       product_url   TEXT,
       image_emoji   TEXT    DEFAULT '🎁',
-      rating        REAL    DEFAULT 4.5,
-      is_active     BOOLEAN DEFAULT 1,
-      created_at    DATETIME DEFAULT (datetime('now'))
+      rating        NUMERIC DEFAULT 4.5,
+      is_active     BOOLEAN DEFAULT TRUE,
+      created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS recommendations (
-      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      id            SERIAL PRIMARY KEY,
       order_id      TEXT    UNIQUE NOT NULL,
       customer_id   INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
       recipient_id  INTEGER NOT NULL REFERENCES recipients(id) ON DELETE CASCADE,
       occasion      TEXT    NOT NULL,
-      min_budget    REAL    NOT NULL CHECK (min_budget > 0),
-      max_budget    REAL    NOT NULL CHECK (max_budget >= min_budget),
+      min_budget    NUMERIC NOT NULL CHECK (min_budget > 0),
+      max_budget    NUMERIC NOT NULL CHECK (max_budget >= min_budget),
       status        TEXT    NOT NULL DEFAULT 'Pending'
                       CHECK (status IN ('Pending', 'Processing', 'Delivered', 'Cancelled')),
-      priority      BOOLEAN DEFAULT 0,
+      priority      BOOLEAN DEFAULT FALSE,
       owner         TEXT    DEFAULT 'Unassigned',
       notes         TEXT,
-      created_at    DATETIME DEFAULT (datetime('now')),
-      updated_at    DATETIME DEFAULT (datetime('now'))
+      created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS recommendation_items (
-      id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+      id                  SERIAL PRIMARY KEY,
       recommendation_id   INTEGER NOT NULL REFERENCES recommendations(id) ON DELETE CASCADE,
       gift_product_id     INTEGER REFERENCES gift_products(id),
       title               TEXT    NOT NULL,
       description         TEXT,
-      estimated_cost      REAL,
+      estimated_cost      NUMERIC,
       emotional_fit       TEXT,
       next_steps          TEXT,
       rank                INTEGER DEFAULT 1,
-      created_at          DATETIME DEFAULT (datetime('now'))
+      created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS recommendation_history (
-      id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+      id                  SERIAL PRIMARY KEY,
       recommendation_id   INTEGER NOT NULL REFERENCES recommendations(id) ON DELETE CASCADE,
       action              TEXT    NOT NULL,
       actor               TEXT    DEFAULT 'System',
-      timestamp           DATETIME DEFAULT (datetime('now'))
+      timestamp           TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS messages (
-      id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+      id                  SERIAL PRIMARY KEY,
       recommendation_id   INTEGER NOT NULL REFERENCES recommendations(id) ON DELETE CASCADE,
       message_type        TEXT    DEFAULT 'greeting',
       content             TEXT    NOT NULL,
-      created_at          DATETIME DEFAULT (datetime('now'))
+      created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS important_dates (
-      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      id            SERIAL PRIMARY KEY,
       customer_id   INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
       label         TEXT    NOT NULL,
       date_value    TEXT    NOT NULL,
       notes         TEXT,
-      created_at    DATETIME DEFAULT (datetime('now'))
+      created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
   `);
 
   // Create indexes for common queries
-  db.exec(`
+  await db.query(`
     CREATE INDEX IF NOT EXISTS idx_recommendations_status   ON recommendations(status);
     CREATE INDEX IF NOT EXISTS idx_recommendations_order_id ON recommendations(order_id);
     CREATE INDEX IF NOT EXISTS idx_recommendation_items_rec ON recommendation_items(recommendation_id);
@@ -117,138 +117,155 @@ function createTables() {
  * Seed the gift_products catalogue with a diverse set of products.
  * Only seeds if the table is empty (idempotent).
  */
-function seedProducts() {
+async function seedProducts() {
   const db = getDb();
-  const count = db.prepare('SELECT COUNT(*) as c FROM gift_products').get();
-  if (count.c > 0) return; // Already seeded
+  const countRes = await db.query('SELECT COUNT(*) as c FROM gift_products');
+  if (parseInt(countRes.rows[0].c) > 0) return; // Already seeded
 
-  const insert = db.prepare(`
+  const insertQuery = `
     INSERT INTO gift_products (title, description, category, price, min_age, max_age, tags, product_url, image_emoji, rating)
-    VALUES (@title, @description, @category, @price, @min_age, @max_age, @tags, @product_url, @image_emoji, @rating)
-  `);
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+  `;
 
   const products = [
     // Technology
-    { title: 'Premium Wireless Earbuds', description: 'High-fidelity sound with active noise cancellation. Perfect for music lovers and commuters.', category: 'Technology', price: 10320, min_age: 12, max_age: 65, tags: 'tech,music,audio,wireless,popular', product_url: 'https://www.amazon.com', image_emoji: '🎧', rating: 4.6 },
-    { title: 'Smart Watch Series 9', description: 'Health tracking, notifications, and seamless phone integration on your wrist.', category: 'Technology', price: 25600, min_age: 16, max_age: 60, tags: 'tech,fitness,health,wearable,premium', product_url: 'https://www.amazon.com', image_emoji: '⌚', rating: 4.7 },
-    { title: 'Portable Bluetooth Speaker', description: 'Waterproof, rugged speaker with 360-degree sound. Great for outdoor adventures.', category: 'Technology', price: 6320, min_age: 14, max_age: 55, tags: 'tech,music,outdoor,portable,speaker', product_url: 'https://www.amazon.com', image_emoji: '🔊', rating: 4.5 },
-    { title: 'E-Reader Tablet', description: 'Glare-free display, weeks of battery life, and access to millions of books.', category: 'Technology', price: 11200, min_age: 10, max_age: 90, tags: 'tech,reading,books,digital,kindle', product_url: 'https://www.amazon.com', image_emoji: '📱', rating: 4.8 },
-    { title: 'Wireless Charging Pad', description: 'Sleek fast-charge pad compatible with all Qi-enabled devices.', category: 'Technology', price: 2800, min_age: 15, max_age: 65, tags: 'tech,accessory,charging,gadget', product_url: 'https://www.amazon.com', image_emoji: '🔋', rating: 4.3 },
+    ['Premium Wireless Earbuds', 'High-fidelity sound with active noise cancellation. Perfect for music lovers and commuters.', 'Technology', 10320, 12, 65, 'tech,music,audio,wireless,popular', 'https://www.amazon.com', '🎧', 4.6],
+    ['Smart Watch Series 9', 'Health tracking, notifications, and seamless phone integration on your wrist.', 'Technology', 25600, 16, 60, 'tech,fitness,health,wearable,premium', 'https://www.amazon.com', '⌚', 4.7],
+    ['Portable Bluetooth Speaker', 'Waterproof, rugged speaker with 360-degree sound. Great for outdoor adventures.', 'Technology', 6320, 14, 55, 'tech,music,outdoor,portable,speaker', 'https://www.amazon.com', '🔊', 4.5],
+    ['E-Reader Tablet', 'Glare-free display, weeks of battery life, and access to millions of books.', 'Technology', 11200, 10, 90, 'tech,reading,books,digital,kindle', 'https://www.amazon.com', '📱', 4.8],
+    ['Wireless Charging Pad', 'Sleek fast-charge pad compatible with all Qi-enabled devices.', 'Technology', 2800, 15, 65, 'tech,accessory,charging,gadget', 'https://www.amazon.com', '🔋', 4.3],
 
     // Lifestyle
-    { title: 'Personalised Leather Journal', description: 'Hand-crafted full-grain leather journal with monogram option. Timeless and elegant.', category: 'Lifestyle', price: 3600, min_age: 14, max_age: 80, tags: 'lifestyle,writing,personal,handcrafted,creative,journal', product_url: 'https://www.amazon.com', image_emoji: '📓', rating: 4.8 },
-    { title: 'Scented Candle Collection', description: 'Set of 3 luxury soy candles in calming fragrances: lavender, vanilla, and cedarwood.', category: 'Lifestyle', price: 3360, min_age: 18, max_age: 80, tags: 'lifestyle,home,relaxation,candle,cozy', product_url: 'https://www.amazon.com', image_emoji: '🕯️', rating: 4.6 },
-    { title: 'Premium Yoga Mat', description: 'Non-slip, eco-friendly yoga mat with alignment guides. Perfect for fitness enthusiasts.', category: 'Lifestyle', price: 5440, min_age: 16, max_age: 70, tags: 'lifestyle,fitness,yoga,wellness,exercise', product_url: 'https://www.amazon.com', image_emoji: '🧘', rating: 4.7 },
-    { title: 'Luxury Bathrobe', description: 'Ultra-soft Turkish cotton bathrobe. Pure comfort for lazy weekends.', category: 'Lifestyle', price: 6800, min_age: 18, max_age: 90, tags: 'lifestyle,comfort,luxury,spa,relaxation', product_url: 'https://www.amazon.com', image_emoji: '🛁', rating: 4.9 },
+    ['Personalised Leather Journal', 'Hand-crafted full-grain leather journal with monogram option. Timeless and elegant.', 'Lifestyle', 3600, 14, 80, 'lifestyle,writing,personal,handcrafted,creative,journal', 'https://www.amazon.com', '📓', 4.8],
+    ['Scented Candle Collection', 'Set of 3 luxury soy candles in calming fragrances: lavender, vanilla, and cedarwood.', 'Lifestyle', 3360, 18, 80, 'lifestyle,home,relaxation,candle,cozy', 'https://www.amazon.com', '🕯️', 4.6],
+    ['Premium Yoga Mat', 'Non-slip, eco-friendly yoga mat with alignment guides. Perfect for fitness enthusiasts.', 'Lifestyle', 5440, 16, 70, 'lifestyle,fitness,yoga,wellness,exercise', 'https://www.amazon.com', '🧘', 4.7],
+    ['Luxury Bathrobe', 'Ultra-soft Turkish cotton bathrobe. Pure comfort for lazy weekends.', 'Lifestyle', 6800, 18, 90, 'lifestyle,comfort,luxury,spa,relaxation', 'https://www.amazon.com', '🛁', 4.9],
 
     // Food & Drink
-    { title: 'Artisan Coffee Experience Set', description: 'Curated single-origin coffees with a beautiful pour-over kit. For the discerning coffee lover.', category: 'Food & Drink', price: 5200, min_age: 18, max_age: 80, tags: 'food,coffee,artisan,gourmet,experience', product_url: 'https://www.amazon.com', image_emoji: '☕', rating: 4.9 },
-    { title: 'Gourmet Chocolate Box', description: 'Handcrafted Belgian chocolates in an elegant gift box. 24 pieces of pure indulgence.', category: 'Food & Drink', price: 3040, min_age: 8, max_age: 90, tags: 'food,chocolate,gourmet,sweet,treat,belgian', product_url: 'https://www.amazon.com', image_emoji: '🍫', rating: 4.8 },
-    { title: 'Premium Tea Sampler', description: 'Collection of 12 rare loose-leaf teas from around the world with infuser.', category: 'Food & Drink', price: 3840, min_age: 14, max_age: 90, tags: 'food,tea,sampler,relaxation,wellness', product_url: 'https://www.amazon.com', image_emoji: '🍵', rating: 4.6 },
-    { title: 'BBQ Spice Collection', description: 'Set of 8 gourmet rubs and seasonings for the grillmaster. Smoky, spicy, and savoury.', category: 'Food & Drink', price: 2800, min_age: 20, max_age: 70, tags: 'food,cooking,bbq,grilling,spice,outdoor', product_url: 'https://www.amazon.com', image_emoji: '🌶️', rating: 4.5 },
+    ['Artisan Coffee Experience Set', 'Curated single-origin coffees with a beautiful pour-over kit. For the discerning coffee lover.', 'Food & Drink', 5200, 18, 80, 'food,coffee,artisan,gourmet,experience', 'https://www.amazon.com', '☕', 4.9],
+    ['Gourmet Chocolate Box', 'Handcrafted Belgian chocolates in an elegant gift box. 24 pieces of pure indulgence.', 'Food & Drink', 3040, 8, 90, 'food,chocolate,gourmet,sweet,treat,belgian', 'https://www.amazon.com', '🍫', 4.8],
+    ['Premium Tea Sampler', 'Collection of 12 rare loose-leaf teas from around the world with infuser.', 'Food & Drink', 3840, 14, 90, 'food,tea,sampler,relaxation,wellness', 'https://www.amazon.com', '🍵', 4.6],
+    ['BBQ Spice Collection', 'Set of 8 gourmet rubs and seasonings for the grillmaster. Smoky, spicy, and savoury.', 'Food & Drink', 2800, 20, 70, 'food,cooking,bbq,grilling,spice,outdoor', 'https://www.amazon.com', '🌶️', 4.5],
 
     // Experience
-    { title: 'Online Masterclass Subscription', description: 'Unlimited access to world-class instructors in cooking, music, writing, and more.', category: 'Experience', price: 7200, min_age: 14, max_age: 70, tags: 'experience,learning,education,subscription,digital,creative', product_url: 'https://www.masterclass.com', image_emoji: '🎓', rating: 4.7 },
-    { title: 'Luxury Spa Day Voucher', description: 'Full-day spa experience including massage, facial, and gourmet lunch.', category: 'Experience', price: 12000, min_age: 18, max_age: 80, tags: 'experience,spa,relaxation,luxury,wellness,pampering', product_url: 'https://www.amazon.com', image_emoji: '💆', rating: 4.9 },
-    { title: 'Cooking Class Experience', description: 'Hands-on cooking class with a professional chef. Choose from Italian, Thai, or French cuisine.', category: 'Experience', price: 6000, min_age: 14, max_age: 75, tags: 'experience,cooking,food,class,learning,culinary', product_url: 'https://www.amazon.com', image_emoji: '👨‍🍳', rating: 4.7 },
-    { title: 'Wine Tasting Tour', description: 'Guided tour of three premium vineyards with food pairings. A memorable day out.', category: 'Experience', price: 8800, min_age: 21, max_age: 75, tags: 'experience,wine,tasting,tour,premium,outdoor', product_url: 'https://www.amazon.com', image_emoji: '🍷', rating: 4.8 },
+    ['Online Masterclass Subscription', 'Unlimited access to world-class instructors in cooking, music, writing, and more.', 'Experience', 7200, 14, 70, 'experience,learning,education,subscription,digital,creative', 'https://www.masterclass.com', '🎓', 4.7],
+    ['Luxury Spa Day Voucher', 'Full-day spa experience including massage, facial, and gourmet lunch.', 'Experience', 12000, 18, 80, 'experience,spa,relaxation,luxury,wellness,pampering', 'https://www.amazon.com', '💆', 4.9],
+    ['Cooking Class Experience', 'Hands-on cooking class with a professional chef. Choose from Italian, Thai, or French cuisine.', 'Experience', 6000, 14, 75, 'experience,cooking,food,class,learning,culinary', 'https://www.amazon.com', '👨‍🍳', 4.7],
+    ['Wine Tasting Tour', 'Guided tour of three premium vineyards with food pairings. A memorable day out.', 'Experience', 8800, 21, 75, 'experience,wine,tasting,tour,premium,outdoor', 'https://www.amazon.com', '🍷', 4.8],
 
     // Home & Garden
-    { title: 'Indoor Herb Garden Kit', description: 'Self-watering smart planter with basil, mint, and cilantro seed pods. Grow herbs year-round.', category: 'Home & Garden', price: 4400, min_age: 14, max_age: 80, tags: 'home,garden,plants,cooking,indoor,sustainable', product_url: 'https://www.amazon.com', image_emoji: '🌿', rating: 4.6 },
-    { title: 'Illustrated City Map Print', description: 'Custom illustrated map of any city. Beautiful wall art with a personal touch.', category: 'Home & Garden', price: 2800, min_age: 18, max_age: 80, tags: 'home,art,decor,personalised,map,wall', product_url: 'https://www.amazon.com', image_emoji: '🗺️', rating: 4.5 },
-    { title: 'Luxury Throw Blanket', description: 'Ultra-soft merino wool throw in neutral tones. The perfect couch companion.', category: 'Home & Garden', price: 6240, min_age: 18, max_age: 90, tags: 'home,comfort,blanket,cozy,luxury,winter', product_url: 'https://www.amazon.com', image_emoji: '🧣', rating: 4.7 },
+    ['Indoor Herb Garden Kit', 'Self-watering smart planter with basil, mint, and cilantro seed pods. Grow herbs year-round.', 'Home & Garden', 4400, 14, 80, 'home,garden,plants,cooking,indoor,sustainable', 'https://www.amazon.com', '🌿', 4.6],
+    ['Illustrated City Map Print', 'Custom illustrated map of any city. Beautiful wall art with a personal touch.', 'Home & Garden', 2800, 18, 80, 'home,art,decor,personalised,map,wall', 'https://www.amazon.com', '🗺️', 4.5],
+    ['Luxury Throw Blanket', 'Ultra-soft merino wool throw in neutral tones. The perfect couch companion.', 'Home & Garden', 6240, 18, 90, 'home,comfort,blanket,cozy,luxury,winter', 'https://www.amazon.com', '🧣', 4.7],
 
     // Jewellery & Accessories
-    { title: 'Minimalist Silver Necklace', description: 'Delicate sterling silver pendant on a fine chain. Timeless and versatile.', category: 'Jewellery', price: 5200, min_age: 16, max_age: 70, tags: 'jewellery,silver,necklace,elegant,gift,accessory', product_url: 'https://www.amazon.com', image_emoji: '📿', rating: 4.8 },
-    { title: 'Leather Wallet', description: 'Slim RFID-blocking leather wallet with card slots and money clip. Sleek and functional.', category: 'Accessories', price: 4400, min_age: 18, max_age: 75, tags: 'accessory,leather,wallet,practical,everyday,professional', product_url: 'https://www.amazon.com', image_emoji: '👛', rating: 4.6 },
-    { title: 'Silk Scarf', description: 'Hand-printed 100% silk scarf in vibrant botanical patterns. A statement accessory.', category: 'Accessories', price: 5760, min_age: 20, max_age: 80, tags: 'accessory,silk,scarf,fashion,elegant,pattern', product_url: 'https://www.amazon.com', image_emoji: '🧣', rating: 4.7 },
+    ['Minimalist Silver Necklace', 'Delicate sterling silver pendant on a fine chain. Timeless and versatile.', 'Jewellery', 5200, 16, 70, 'jewellery,silver,necklace,elegant,gift,accessory', 'https://www.amazon.com', '📿', 4.8],
+    ['Leather Wallet', 'Slim RFID-blocking leather wallet with card slots and money clip. Sleek and functional.', 'Accessories', 4400, 18, 75, 'accessory,leather,wallet,practical,everyday,professional', 'https://www.amazon.com', '👛', 4.6],
+    ['Silk Scarf', 'Hand-printed 100% silk scarf in vibrant botanical patterns. A statement accessory.', 'Accessories', 5760, 20, 80, 'accessory,silk,scarf,fashion,elegant,pattern', 'https://www.amazon.com', '🧣', 4.7],
 
     // Kids & Teens
-    { title: 'LEGO Architecture Set', description: 'Build iconic world landmarks with this detailed architecture set. Ages 12+.', category: 'Kids & Teens', price: 4000, min_age: 8, max_age: 16, tags: 'kids,lego,building,creative,architecture,toy', product_url: 'https://www.amazon.com', image_emoji: '🧱', rating: 4.9 },
-    { title: 'Art Supply Kit', description: 'Professional-grade art set with pencils, pastels, watercolours, and sketchbook.', category: 'Kids & Teens', price: 3200, min_age: 6, max_age: 25, tags: 'kids,art,creative,drawing,painting,supplies', product_url: 'https://www.amazon.com', image_emoji: '🎨', rating: 4.7 },
-    { title: 'Science Experiment Kit', description: 'Over 30 fun experiments covering chemistry, physics, and biology. Educational and exciting.', category: 'Kids & Teens', price: 2560, min_age: 6, max_age: 14, tags: 'kids,science,education,experiment,stem,fun', product_url: 'https://www.amazon.com', image_emoji: '🔬', rating: 4.6 },
+    ['LEGO Architecture Set', 'Build iconic world landmarks with this detailed architecture set. Ages 12+.', 'Kids & Teens', 4000, 8, 16, 'kids,lego,building,creative,architecture,toy', 'https://www.amazon.com', '🧱', 4.9],
+    ['Art Supply Kit', 'Professional-grade art set with pencils, pastels, watercolours, and sketchbook.', 'Kids & Teens', 3200, 6, 25, 'kids,art,creative,drawing,painting,supplies', 'https://www.amazon.com', '🎨', 4.7],
+    ['Science Experiment Kit', 'Over 30 fun experiments covering chemistry, physics, and biology. Educational and exciting.', 'Kids & Teens', 2560, 6, 14, 'kids,science,education,experiment,stem,fun', 'https://www.amazon.com', '🔬', 4.6],
 
     // Sports & Outdoors
-    { title: 'Insulated Hiking Backpack', description: 'Lightweight 30L backpack with hydration compartment and rain cover.', category: 'Sports & Outdoors', price: 7120, min_age: 14, max_age: 60, tags: 'outdoor,hiking,backpack,travel,adventure,nature', product_url: 'https://www.amazon.com', image_emoji: '🎒', rating: 4.7 },
-    { title: 'Smart Water Bottle', description: 'Temperature-tracking insulated bottle that reminds you to stay hydrated.', category: 'Sports & Outdoors', price: 3600, min_age: 12, max_age: 65, tags: 'outdoor,fitness,hydration,smart,health,tech', product_url: 'https://www.amazon.com', image_emoji: '🧊', rating: 4.5 },
-    { title: 'Camping Hammock', description: 'Ultralight portable hammock with mosquito net. Sets up in 60 seconds.', category: 'Sports & Outdoors', price: 4400, min_age: 14, max_age: 55, tags: 'outdoor,camping,hammock,adventure,nature,portable', product_url: 'https://www.amazon.com', image_emoji: '🏕️', rating: 4.6 },
+    ['Insulated Hiking Backpack', 'Lightweight 30L backpack with hydration compartment and rain cover.', 'Sports & Outdoors', 7120, 14, 60, 'outdoor,hiking,backpack,travel,adventure,nature', 'https://www.amazon.com', '🎒', 4.7],
+    ['Smart Water Bottle', 'Temperature-tracking insulated bottle that reminds you to stay hydrated.', 'Sports & Outdoors', 3600, 12, 65, 'outdoor,fitness,hydration,smart,health,tech', 'https://www.amazon.com', '🧊', 4.5],
+    ['Camping Hammock', 'Ultralight portable hammock with mosquito net. Sets up in 60 seconds.', 'Sports & Outdoors', 4400, 14, 55, 'outdoor,camping,hammock,adventure,nature,portable', 'https://www.amazon.com', '🏕️', 4.6],
 
     // Books & Stationery
-    { title: 'Bestseller Book Box', description: 'Curated box of 3 bestselling books based on your interests. Surprise selection each time.', category: 'Books & Stationery', price: 3200, min_age: 14, max_age: 90, tags: 'books,reading,literature,subscription,curated', product_url: 'https://www.amazon.com', image_emoji: '📚', rating: 4.7 },
-    { title: 'Fountain Pen Set', description: 'Elegant fountain pen with converter and ink set. For the person who appreciates the art of writing.', category: 'Books & Stationery', price: 4640, min_age: 16, max_age: 80, tags: 'stationery,writing,pen,fountain,elegant,professional', product_url: 'https://www.amazon.com', image_emoji: '🖋️', rating: 4.8 },
+    ['Bestseller Book Box', 'Curated box of 3 bestselling books based on your interests. Surprise selection each time.', 'Books & Stationery', 3200, 14, 90, 'books,reading,literature,subscription,curated', 'https://www.amazon.com', '📚', 4.7],
+    ['Fountain Pen Set', 'Elegant fountain pen with converter and ink set. For the person who appreciates the art of writing.', 'Books & Stationery', 4640, 16, 80, 'stationery,writing,pen,fountain,elegant,professional', 'https://www.amazon.com', '🖋️', 4.8],
   ];
 
-  const insertMany = db.transaction((items) => {
-    for (const item of items) {
-      insert.run(item);
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    for (const item of products) {
+      await client.query(insertQuery, item);
     }
-  });
-
-  insertMany(products);
-  console.log(`  ✓ Seeded ${products.length} gift products into catalogue.`);
+    await client.query('COMMIT');
+    console.log(`  ✓ Seeded ${products.length} gift products into catalogue.`);
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
 }
 
 /**
  * Seed some demo recommendation records for the dashboard.
  */
-function seedDemoOrders() {
+async function seedDemoOrders() {
   const db = getDb();
-  const count = db.prepare('SELECT COUNT(*) as c FROM recommendations').get();
-  if (count.c > 0) return;
+  const countRes = await db.query('SELECT COUNT(*) as c FROM recommendations');
+  if (parseInt(countRes.rows[0].c) > 0) return;
 
-  // Create a demo customer
-  const custResult = db.prepare(`INSERT INTO customers (name, email) VALUES ('Demo User', 'demo@paperplane.io')`).run();
-  const customerId = custResult.lastInsertRowid;
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
 
-  const demoOrders = [
-    { name: 'Emma Clarke', relation: 'Friend', age: 28, prefs: 'Loves vintage aesthetics, journaling, and coffee shops', occasion: 'Birthday', min_budget: 1000, max_budget: 5000, status: 'Delivered', owner: 'John Smith', priority: 0, notes: 'Emma loves vintage aesthetics. Monogram her initials on the cover.', date: '2026-06-10' },
-    { name: 'Liam Johnson', relation: 'Partner/Spouse', age: 35, prefs: 'Jazz music, daily commuter, tech enthusiast', occasion: 'Anniversary', min_budget: 5000, max_budget: 15000, status: 'Processing', owner: 'Sarah Lee', priority: 1, notes: 'He commutes daily and listens to jazz. ANC is a must.', date: '2026-06-13' },
-    { name: 'Priya Mehta', relation: 'Colleague', age: 32, prefs: 'Light roast coffee, mindfulness, yoga', occasion: 'Thank You', min_budget: 2000, max_budget: 8000, status: 'Pending', owner: 'Raj Patel', priority: 0, notes: 'She prefers light roasts. Add a handwritten thank-you card.', date: '2026-06-14' },
-    { name: 'Tom Baker', relation: 'Child', age: 22, prefs: 'Film, guitar, creative writing', occasion: 'Graduation', min_budget: 5000, max_budget: 10000, status: 'Cancelled', owner: 'Maria Garcia', priority: 0, notes: 'Tom decided he wanted a physical gift instead.', date: '2026-06-08' },
-    { name: 'Olivia White', relation: 'Parent', age: 58, prefs: 'Gardening, spa, relaxation, cooking', occasion: "Mother's Day", min_budget: 10000, max_budget: 20000, status: 'Pending', owner: 'Chris Brown', priority: 1, notes: "HIGH PRIORITY - Same-day delivery required for the physical voucher.", date: '2026-06-14' },
-    { name: 'Noah Davis', relation: 'Sibling', age: 26, prefs: 'Fitness, running, smartwatch apps', occasion: 'Birthday', min_budget: 20000, max_budget: 40000, status: 'Processing', owner: 'John Smith', priority: 0, notes: 'Noah is into fitness tracking. Ensure the watch supports third-party apps.', date: '2026-06-12' },
-    { name: 'Amelia Wilson', relation: 'Boss', age: 45, prefs: 'Vegetarian, fine dining, elegant gifts', occasion: 'Christmas', min_budget: 1000, max_budget: 5000, status: 'Delivered', owner: 'Sarah Lee', priority: 0, notes: 'She is vegetarian. Confirmed the chocolates contain no gelatin.', date: '2026-05-28' },
-  ];
+    const custResult = await client.query(`INSERT INTO customers (name, email) VALUES ($1, $2) RETURNING id`, ['Demo User', 'demo@paperplane.io']);
+    const customerId = custResult.rows[0].id;
 
-  const insertRecipient = db.prepare(`INSERT INTO recipients (customer_id, name, relation, age, preferences) VALUES (?, ?, ?, ?, ?)`);
-  const insertRec = db.prepare(`INSERT INTO recommendations (order_id, customer_id, recipient_id, occasion, min_budget, max_budget, status, priority, owner, notes, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
-  const insertHistory = db.prepare(`INSERT INTO recommendation_history (recommendation_id, action, actor, timestamp) VALUES (?, ?, ?, ?)`);
+    const demoOrders = [
+      { name: 'Emma Clarke', relation: 'Friend', age: 28, prefs: 'Loves vintage aesthetics, journaling, and coffee shops', occasion: 'Birthday', min_budget: 1000, max_budget: 5000, status: 'Delivered', owner: 'John Smith', priority: false, notes: 'Emma loves vintage aesthetics. Monogram her initials on the cover.', date: '2026-06-10' },
+      { name: 'Liam Johnson', relation: 'Partner/Spouse', age: 35, prefs: 'Jazz music, daily commuter, tech enthusiast', occasion: 'Anniversary', min_budget: 5000, max_budget: 15000, status: 'Processing', owner: 'Sarah Lee', priority: true, notes: 'He commutes daily and listens to jazz. ANC is a must.', date: '2026-06-13' },
+      { name: 'Priya Mehta', relation: 'Colleague', age: 32, prefs: 'Light roast coffee, mindfulness, yoga', occasion: 'Thank You', min_budget: 2000, max_budget: 8000, status: 'Pending', owner: 'Raj Patel', priority: false, notes: 'She prefers light roasts. Add a handwritten thank-you card.', date: '2026-06-14' },
+      { name: 'Tom Baker', relation: 'Child', age: 22, prefs: 'Film, guitar, creative writing', occasion: 'Graduation', min_budget: 5000, max_budget: 10000, status: 'Cancelled', owner: 'Maria Garcia', priority: false, notes: 'Tom decided he wanted a physical gift instead.', date: '2026-06-08' },
+      { name: 'Olivia White', relation: 'Parent', age: 58, prefs: 'Gardening, spa, relaxation, cooking', occasion: "Mother's Day", min_budget: 10000, max_budget: 20000, status: 'Pending', owner: 'Chris Brown', priority: true, notes: "HIGH PRIORITY - Same-day delivery required for the physical voucher.", date: '2026-06-14' },
+      { name: 'Noah Davis', relation: 'Sibling', age: 26, prefs: 'Fitness, running, smartwatch apps', occasion: 'Birthday', min_budget: 20000, max_budget: 40000, status: 'Processing', owner: 'John Smith', priority: false, notes: 'Noah is into fitness tracking. Ensure the watch supports third-party apps.', date: '2026-06-12' },
+      { name: 'Amelia Wilson', relation: 'Boss', age: 45, prefs: 'Vegetarian, fine dining, elegant gifts', occasion: 'Christmas', min_budget: 1000, max_budget: 5000, status: 'Delivered', owner: 'Sarah Lee', priority: false, notes: 'She is vegetarian. Confirmed the chocolates contain no gelatin.', date: '2026-05-28' },
+    ];
 
-  const seedAll = db.transaction(() => {
-    demoOrders.forEach((o, i) => {
-      const recipientResult = insertRecipient.run(customerId, o.name, o.relation, o.age, o.prefs);
-      const recipientId = recipientResult.lastInsertRowid;
+    let i = 0;
+    for (const o of demoOrders) {
+      const recipientResult = await client.query(
+        `INSERT INTO recipients (customer_id, name, relation, age, preferences) VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+        [customerId, o.name, o.relation, o.age, o.prefs]
+      );
+      const recipientId = recipientResult.rows[0].id;
 
       const orderId = `ORD-${String(i + 1).padStart(3, '0')}`;
-      const recResult = insertRec.run(orderId, customerId, recipientId, o.occasion, o.min_budget, o.max_budget, o.status, o.priority, o.owner, o.notes, o.date, o.date);
-      const recId = recResult.lastInsertRowid;
+      const recResult = await client.query(
+        `INSERT INTO recommendations (order_id, customer_id, recipient_id, occasion, min_budget, max_budget, status, priority, owner, notes, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11) RETURNING id`,
+        [orderId, customerId, recipientId, o.occasion, o.min_budget, o.max_budget, o.status, o.priority, o.owner, o.notes, o.date]
+      );
+      const recId = recResult.rows[0].id;
 
-      insertHistory.run(recId, 'Order created via AI recommendation.', 'System', o.date + ' 09:00');
+      await client.query(`INSERT INTO recommendation_history (recommendation_id, action, actor, timestamp) VALUES ($1, $2, $3, $4)`, [recId, 'Order created via AI recommendation.', 'System', o.date + ' 09:00:00']);
 
       if (o.status === 'Processing' || o.status === 'Delivered') {
-        insertHistory.run(recId, `Status updated: Pending to Processing.`, o.owner, o.date + ' 10:00');
+        await client.query(`INSERT INTO recommendation_history (recommendation_id, action, actor, timestamp) VALUES ($1, $2, $3, $4)`, [recId, `Status updated: Pending to Processing.`, o.owner, o.date + ' 10:00:00']);
       }
       if (o.status === 'Delivered') {
-        insertHistory.run(recId, `Status updated: Processing to Delivered.`, o.owner, o.date + ' 14:00');
+        await client.query(`INSERT INTO recommendation_history (recommendation_id, action, actor, timestamp) VALUES ($1, $2, $3, $4)`, [recId, `Status updated: Processing to Delivered.`, o.owner, o.date + ' 14:00:00']);
       }
       if (o.status === 'Cancelled') {
-        insertHistory.run(recId, `Status updated: Pending to Cancelled. Customer preference.`, o.owner, o.date + ' 14:00');
+        await client.query(`INSERT INTO recommendation_history (recommendation_id, action, actor, timestamp) VALUES ($1, $2, $3, $4)`, [recId, `Status updated: Pending to Cancelled. Customer preference.`, o.owner, o.date + ' 14:00:00']);
       }
-    });
-  });
+      i++;
+    }
 
-  seedAll();
-  console.log(`  ✓ Seeded ${demoOrders.length} demo orders with history.`);
+    await client.query('COMMIT');
+    console.log(`  ✓ Seeded ${demoOrders.length} demo orders with history.`);
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
 }
 
 /**
  * Run full database initialization: create tables, seed products, seed demo data.
  */
-function initializeDatabase() {
+async function initializeDatabase() {
   console.log('📦 Initializing database...');
-  createTables();
-  seedProducts();
-  // seedDemoOrders(); // Removed for deployment
+  await createTables();
+  await seedProducts();
+  // await seedDemoOrders(); // Removed for deployment
   console.log('✅ Database ready.\n');
 }
 

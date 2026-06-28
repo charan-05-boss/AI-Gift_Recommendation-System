@@ -24,19 +24,21 @@ router.post('/:id', asyncHandler(async (req, res) => {
   // 1. Find the order
   let rec;
   if (id.startsWith('ORD-')) {
-    rec = db.prepare(`
+    const recRes = await db.query(`
       SELECT r.*, rec.relation, rec.age, rec.preferences
       FROM recommendations r
       JOIN recipients rec ON rec.id = r.recipient_id
-      WHERE r.order_id = ?
-    `).get(id);
+      WHERE r.order_id = $1
+    `, [id]);
+    rec = recRes.rows[0];
   } else {
-    rec = db.prepare(`
+    const recRes = await db.query(`
       SELECT r.*, rec.relation, rec.age, rec.preferences
       FROM recommendations r
       JOIN recipients rec ON rec.id = r.recipient_id
-      WHERE r.id = ?
-    `).get(parseInt(id));
+      WHERE r.id = $1
+    `, [parseInt(id)]);
+    rec = recRes.rows[0];
   }
 
   if (!rec) {
@@ -54,26 +56,27 @@ router.post('/:id', asyncHandler(async (req, res) => {
     occasion: rec.occasion,
     relation: rec.relation,
     age: rec.age,
-    budget: rec.budget,
+    budget: parseFloat(rec.max_budget),
     preferences: rec.preferences || '',
   };
 
   const { engine, recommendations } = await recommend(input);
 
   // 4. Save recommendations in a transaction
-  db.transaction(() => {
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    
     // Clear any previous recommendation items for this order
-    db.prepare(`DELETE FROM recommendation_items WHERE recommendation_id = ?`).run(rec.id);
+    await client.query(`DELETE FROM recommendation_items WHERE recommendation_id = $1`, [rec.id]);
 
     // Insert new items
-    const insertItem = db.prepare(`
-      INSERT INTO recommendation_items
-        (recommendation_id, gift_product_id, title, description, estimated_cost, emotional_fit, next_steps, rank)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
     for (const item of recommendations) {
-      insertItem.run(
+      await client.query(`
+        INSERT INTO recommendation_items
+          (recommendation_id, gift_product_id, title, description, estimated_cost, emotional_fit, next_steps, rank)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `, [
         rec.id,
         item.gift_product_id || null,
         item.title,
@@ -82,25 +85,34 @@ router.post('/:id', asyncHandler(async (req, res) => {
         item.emotional_fit || null,
         item.next_steps || null,
         item.rank
-      );
+      ]);
     }
 
     // Update status to Processing
     if (rec.status === 'Pending') {
-      db.prepare(
-        `UPDATE recommendations SET status = 'Processing', updated_at = datetime('now') WHERE id = ?`
-      ).run(rec.id);
+      await client.query(
+        `UPDATE recommendations SET status = 'Processing', updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
+        [rec.id]
+      );
     }
 
     // Log in history
-    db.prepare(
-      `INSERT INTO recommendation_history (recommendation_id, action, actor) VALUES (?, ?, ?)`
-    ).run(
-      rec.id,
-      `AI engine (${engine}) generated ${recommendations.length} recommendations. Status: ${rec.status} to Processing.`,
-      'System'
+    await client.query(
+      `INSERT INTO recommendation_history (recommendation_id, action, actor) VALUES ($1, $2, $3)`,
+      [
+        rec.id,
+        `AI engine (${engine}) generated ${recommendations.length} recommendations. Status: ${rec.status} to Processing.`,
+        'System'
+      ]
     );
-  })();
+    
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 
   console.log(`  ✅ Generated ${recommendations.length} recommendations via ${engine} engine.\n`);
 
@@ -114,12 +126,12 @@ router.post('/:id', asyncHandler(async (req, res) => {
       id: r.rank,
       title: r.title,
       description: r.description,
-      estimatedCost: r.estimated_cost,
+      estimatedCost: parseFloat(r.estimated_cost),
       emotional_fit: r.emotional_fit,
       next_steps: r.next_steps,
       category: r.category || 'General',
       imageEmoji: r.image_emoji || '🎁',
-      rating: r.rating || 4.5,
+      rating: parseFloat(r.rating) || 4.5,
       productUrl: r.product_url || '',
       tags: r.tags || [],
     })),

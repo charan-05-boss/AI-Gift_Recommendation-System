@@ -26,7 +26,7 @@ router.get('/', asyncHandler(async (req, res) => {
       r.id,
       r.order_id,
       r.occasion,
-      r.budget,
+      r.max_budget,
       r.status,
       r.priority,
       r.owner,
@@ -39,7 +39,7 @@ router.get('/', asyncHandler(async (req, res) => {
       rec.preferences,
       COALESCE(
         (SELECT SUM(ri.estimated_cost) FROM recommendation_items ri WHERE ri.recommendation_id = r.id AND ri.rank = 1),
-        r.budget
+        r.max_budget
       ) AS amount
     FROM recommendations r
     JOIN recipients rec ON rec.id = r.recipient_id
@@ -47,10 +47,11 @@ router.get('/', asyncHandler(async (req, res) => {
   `;
 
   const params = [];
+  let paramIndex = 1;
 
   // Filter by status
   if (status && status !== 'All') {
-    sql += ` AND r.status = ?`;
+    sql += ` AND r.status = $${paramIndex++}`;
     params.push(status);
   }
 
@@ -58,12 +59,13 @@ router.get('/', asyncHandler(async (req, res) => {
   if (search && search.trim()) {
     const q = `%${search.trim()}%`;
     sql += ` AND (
-      r.order_id LIKE ? OR
-      rec.name   LIKE ? OR
-      r.owner    LIKE ? OR
-      r.occasion LIKE ?
+      r.order_id ILIKE $${paramIndex} OR
+      rec.name   ILIKE $${paramIndex} OR
+      r.owner    ILIKE $${paramIndex} OR
+      r.occasion ILIKE $${paramIndex}
     )`;
-    params.push(q, q, q, q);
+    params.push(q);
+    paramIndex++;
   }
 
   // Sorting
@@ -79,7 +81,8 @@ router.get('/', asyncHandler(async (req, res) => {
   const sortDirection = sort_dir === 'asc' ? 'ASC' : 'DESC';
   sql += ` ORDER BY ${sortColumn} ${sortDirection}`;
 
-  const orders = db.prepare(sql).all(...params);
+  const ordersRes = await db.query(sql, params);
+  const orders = ordersRes.rows;
 
   // Format for the frontend
   const formatted = orders.map(o => ({
@@ -89,9 +92,9 @@ router.get('/', asyncHandler(async (req, res) => {
     relation: o.relation,
     occasion: o.occasion,
     status: o.status,
-    date: o.created_at ? o.created_at.split('T')[0].split(' ')[0] : null,
+    date: o.created_at ? new Date(o.created_at).toISOString().split('T')[0] : null,
     owner: o.owner,
-    amount: Math.round(o.amount),
+    amount: Math.round(parseFloat(o.amount)),
     priority: !!o.priority,
   }));
 

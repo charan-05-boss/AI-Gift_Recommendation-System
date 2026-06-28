@@ -23,9 +23,8 @@ router.post('/', asyncHandler(async (req, res) => {
   const db = getDb();
 
   // 2. Generate next order_id
-  const lastOrder = db.prepare(
-    `SELECT order_id FROM recommendations ORDER BY id DESC LIMIT 1`
-  ).get();
+  const lastOrderRes = await db.query(`SELECT order_id FROM recommendations ORDER BY id DESC LIMIT 1`);
+  const lastOrder = lastOrderRes.rows[0];
 
   let nextNum = 1;
   if (lastOrder && lastOrder.order_id) {
@@ -35,73 +34,70 @@ router.post('/', asyncHandler(async (req, res) => {
   const orderId = `ORD-${String(nextNum).padStart(3, '0')}`;
 
   // 3. Insert records in a transaction
-  const result = db.transaction(() => {
+  let result;
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    
     // Create customer
-    const custResult = db.prepare(
-      `INSERT INTO customers (name, email, phone) VALUES (?, ?, ?)`
-    ).run(
-      body.customerName || 'Guest',
-      body.customerEmail || null,
-      body.customerPhone || null
+    const custResult = await client.query(
+      `INSERT INTO customers (name, email, phone) VALUES ($1, $2, $3) RETURNING id`,
+      [body.customerName || 'Guest', body.customerEmail || null, body.customerPhone || null]
     );
-    const customerId = custResult.lastInsertRowid;
+    const customerId = custResult.rows[0].id;
 
     // Create recipient
-    const recipResult = db.prepare(
-      `INSERT INTO recipients (customer_id, name, relation, age, preferences) VALUES (?, ?, ?, ?, ?)`
-    ).run(
-      customerId,
-      body.recipientName || 'Unnamed Recipient',
-      body.relation.trim(),
-      parseInt(body.age),
-      body.preferences || null
+    const recipResult = await client.query(
+      `INSERT INTO recipients (customer_id, name, relation, age, preferences) VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+      [customerId, body.recipientName || 'Unnamed Recipient', body.relation.trim(), parseInt(body.age), body.preferences || null]
     );
-    const recipientId = recipResult.lastInsertRowid;
+    const recipientId = recipResult.rows[0].id;
 
     // Create recommendation
-    const recResult = db.prepare(
+    const recResult = await client.query(
       `INSERT INTO recommendations (order_id, customer_id, recipient_id, occasion, min_budget, max_budget, status, priority, owner, notes)
-       VALUES (?, ?, ?, ?, ?, ?, 'Pending', ?, ?, ?)`
-    ).run(
-      orderId,
-      customerId,
-      recipientId,
-      body.occasion.trim(),
-      parseFloat(body.minBudget),
-      parseFloat(body.maxBudget),
-      body.priority ? 1 : 0,
-      body.owner || 'Unassigned',
-      body.notes || null
+       VALUES ($1, $2, $3, $4, $5, $6, 'Pending', $7, $8, $9) RETURNING id`,
+      [orderId, customerId, recipientId, body.occasion.trim(), parseFloat(body.minBudget), parseFloat(body.maxBudget), body.priority ? true : false, body.owner || 'Unassigned', body.notes || null]
     );
-    const recommendationId = recResult.lastInsertRowid;
+    const recommendationId = recResult.rows[0].id;
 
     // Log creation in history
-    db.prepare(
-      `INSERT INTO recommendation_history (recommendation_id, action, actor) VALUES (?, ?, ?)`
-    ).run(recommendationId, 'Order created.', body.customerName || 'Guest');
+    await client.query(
+      `INSERT INTO recommendation_history (recommendation_id, action, actor) VALUES ($1, $2, $3)`,
+      [recommendationId, 'Order created.', body.customerName || 'Guest']
+    );
 
     // Optionally store an important date
     if (body.importantDate) {
-      db.prepare(
-        `INSERT INTO important_dates (customer_id, label, date_value, notes) VALUES (?, ?, ?, ?)`
-      ).run(customerId, body.occasion, body.importantDate, `Important date for ${body.occasion}`);
+      await client.query(
+        `INSERT INTO important_dates (customer_id, label, date_value, notes) VALUES ($1, $2, $3, $4)`,
+        [customerId, body.occasion, body.importantDate, `Important date for ${body.occasion}`]
+      );
     }
 
-    return {
+    await client.query('COMMIT');
+    
+    result = {
       id: recommendationId,
       order_id: orderId,
       customer_id: customerId,
       recipient_id: recipientId,
     };
-  })();
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 
   // 4. Fetch the complete created record for the response
-  const created = db.prepare(`
+  const createdRes = await db.query(`
     SELECT r.*, rec.name as recipient_name, rec.relation, rec.age, rec.preferences
     FROM recommendations r
     JOIN recipients rec ON rec.id = r.recipient_id
-    WHERE r.id = ?
-  `).get(result.id);
+    WHERE r.id = $1
+  `, [result.id]);
+  const created = createdRes.rows[0];
 
   res.status(201).json({
     success: true,
@@ -113,8 +109,8 @@ router.post('/', asyncHandler(async (req, res) => {
       relation: created.relation,
       age: created.age,
       occasion: created.occasion,
-      minBudget: created.min_budget,
-      maxBudget: created.max_budget,
+      minBudget: parseFloat(created.min_budget),
+      maxBudget: parseFloat(created.max_budget),
       status: created.status,
       priority: !!created.priority,
       owner: created.owner,
